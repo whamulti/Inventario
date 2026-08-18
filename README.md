@@ -19,7 +19,7 @@ Ferramenta que extrai dados de estoque de um relatório em PDF exportado do ERP 
    ```
 
 3. O script gera, na mesma pasta do PDF (`Inventario\Inventario\`):
-   - `61_MENDES_inventario.xlsx` — planilha com todos os produtos extraídos (Código, Nome do Produto, Cor/Variação, Qtde em Estoque, Qtde Reservada, Qtde Disponível, Página).
+   - `61_MENDES_inventario.xlsx` — planilha com todos os produtos extraídos (Código, Nome do Produto, Cor/Variação, Qtde em Estoque, Qtde Reservada, Página).
    - `61_MENDES_reservas.log` — log detalhado, listando por página os produtos com quantidade reservada > 0, mais um resumo geral.
 
 4. No terminal, é exibido um resumo (totais, primeiros/últimos produtos, lista de reservados) seguido de uma **verificação automática**: o script lê as linhas "Qtde Total em Estoque" e "Qtde Total Reservada" que o próprio PDF imprime na última página e compara com a soma calculada a partir dos produtos extraídos. Se a diferença ficar em 0 (ou muito próxima disso), a extração está correta para aquele relatório.

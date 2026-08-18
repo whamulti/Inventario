@@ -62,7 +62,6 @@ def extrair_produtos_inventario(caminho_pdf, arquivo_log):
                         'Cor/Variação': descricao_cor if descricao_cor else "",
                         'Qtde em Estoque': qtde_estoque,
                         'Qtde Reservada': reservada,
-                        'Qtde Disponível': qtde_estoque - reservada,
                         'Página': pagina_num
                     })
                     if reservada > 0 and pagina_num not in paginas_com_reserva:
@@ -133,7 +132,7 @@ def extrair_produtos_inventario(caminho_pdf, arquivo_log):
                         log.write(f"  Código: {prod['Código']}\n")
                         log.write(f"  Nome: {prod['Nome do Produto']}\n")
                         log.write(f"  Cor/Variação: {prod['Cor/Variação']}\n")
-                        log.write(f"  Estoque: {prod['Qtde em Estoque']} | Reservada: {prod['Qtde Reservada']} | Disponível: {prod['Qtde Disponível']}\n")
+                        log.write(f"  Estoque: {prod['Qtde em Estoque']} | Reservada: {prod['Qtde Reservada']}\n")
                         log.write("\n")
         
         log.write("="*80 + "\n")
@@ -175,7 +174,6 @@ def exibir_resumo(df):
     print(f"Total de produtos: {len(df)}")
     print(f"Total em Estoque: {df['Qtde em Estoque'].sum()}")
     print(f"Total Reservado: {df['Qtde Reservada'].sum()}")
-    print(f"Total Disponível: {df['Qtde Disponível'].sum()}")
     
     produtos_com_reserva = df[df['Qtde Reservada'] > 0]
     print(f"\nProdutos com quantidade reservada: {len(produtos_com_reserva)}")
