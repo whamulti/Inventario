@@ -1,3 +1,4 @@
+import os
 import pdfplumber
 import pandas as pd
 import re
@@ -198,21 +199,20 @@ def exibir_resumo(df):
         print(produtos_com_reserva[['Código', 'Nome do Produto', 'Qtde em Estoque', 'Qtde Reservada', 'Página']].to_string(index=False))
 
 if __name__ == "__main__":
-    caminho_pdf = r"C:\Users\ricardo\Documents\Inventario\61 MENDES.pdf"
-    arquivo_log = r"C:\Users\ricardo\Documents\Inventario\61_MENDES_reservas.log"
-    
+    caminho_pdf = r"C:\Users\ricardo\Documents\GitHub\Inventario\Inventario\61 MENDES.pdf"
+    pasta_pdf = os.path.dirname(caminho_pdf)
+    arquivo_log = os.path.join(pasta_pdf, "61_MENDES_reservas.log")
+    arquivo_excel = os.path.join(pasta_pdf, "61_MENDES_inventario.xlsx")
+
     print("Iniciando extração de dados do PDF...")
     print(f"Arquivo: {caminho_pdf}\n")
-    
+
     produtos, total_geral_estoque, total_geral_reservada = extrair_produtos_inventario(caminho_pdf, arquivo_log)
 
     if produtos:
         print(f"\nArquivo de log criado: {arquivo_log}")
 
-        df = salvar_resultados(
-            produtos,
-            r"C:\Users\ricardo\Documents\Inventario\61_MENDES_inventario.xlsx"
-        )
+        df = salvar_resultados(produtos, arquivo_excel)
 
         exibir_resumo(df)
 
