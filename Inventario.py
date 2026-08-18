@@ -3,121 +3,126 @@ import pandas as pd
 import re
 from datetime import datetime
 
+# Cabeçalho de produto: "<código> - <nome> ... U ... * <UN|MT|RL|...>"
+# O código pode ter poucos dígitos, letras (ex: "105C") ou pontos (ex: "50.0261"),
+# então a detecção não pode depender da quantidade de dígitos.
+PADRAO_CODIGO_NOME = re.compile(r'^(\S+?)\s*-\s*(.+)$')
+# Terminador normal: "* UN", "* MT" etc.
+PADRAO_FIM_UNIDADE = re.compile(r'\*\s*[A-Za-z]{2,4}\s*$')
+# Quando a extração do PDF corta a linha em "... U *" (unidade perdida na quebra)
+PADRAO_U_ISOLADO = re.compile(r'\bU\b')
+# Quando a linha termina em "... 42 UN" (grade de tamanhos, sem asterisco)
+PADRAO_FIM_UNIDADE_SEM_ASTERISCO = re.compile(r'\d\s+[A-Za-z]{2,4}\s*$')
+
+
+def extrair_cabecalho_produto(linha_limpa):
+    """Retorna (código, nome) se a linha for um cabeçalho de produto, senão None."""
+    m = PADRAO_CODIGO_NOME.match(linha_limpa)
+    if not m:
+        return None
+    codigo, resto = m.group(1), m.group(2).strip()
+    if (PADRAO_FIM_UNIDADE.search(resto)
+            or PADRAO_U_ISOLADO.search(resto)
+            or PADRAO_FIM_UNIDADE_SEM_ASTERISCO.search(resto)):
+        return codigo, resto
+    return None
+
 def extrair_produtos_inventario(caminho_pdf, arquivo_log):
     produtos = []
     paginas_com_reserva = []
-    
+
     with open(arquivo_log, 'w', encoding='utf-8') as log:
         log.write("="*80 + "\n")
         log.write(f"LOG DE EXTRAÇÃO DE INVENTÁRIO\n")
         log.write(f"Data/Hora: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n")
         log.write(f"Arquivo: {caminho_pdf}\n")
         log.write("="*80 + "\n\n")
-        
+
         with pdfplumber.open(caminho_pdf) as pdf:
             total_paginas = len(pdf.pages)
             log.write(f"Total de páginas no PDF: {total_paginas}\n\n")
-            
-            codigo_produto = None
+
+            cod_produto = None
+            nome_produto = None
             descricao_cor = None
             qtde_estoque = None
             qtde_reservada = None
             pagina_num = 0
-            
+            total_geral_estoque = None
+            total_geral_reservada = None
+
+            def flush_produto():
+                nonlocal cod_produto, nome_produto, descricao_cor, qtde_estoque, qtde_reservada
+                if cod_produto and qtde_estoque is not None:
+                    reservada = qtde_reservada if qtde_reservada is not None else 0
+                    produtos.append({
+                        'Código': cod_produto,
+                        'Nome do Produto': nome_produto,
+                        'Cor/Variação': descricao_cor if descricao_cor else "",
+                        'Qtde em Estoque': qtde_estoque,
+                        'Qtde Reservada': reservada,
+                        'Qtde Disponível': qtde_estoque - reservada,
+                        'Página': pagina_num
+                    })
+                    if reservada > 0 and pagina_num not in paginas_com_reserva:
+                        paginas_com_reserva.append(pagina_num)
+                cod_produto = None
+                nome_produto = None
+                descricao_cor = None
+                qtde_estoque = None
+                qtde_reservada = None
+
             for pagina in pdf.pages:
                 pagina_num += 1
                 texto = pagina.extract_text()
-                
+
                 if texto:
                     linhas = texto.split('\n')
-                    
+
                     for i, linha in enumerate(linhas):
                         linha_limpa = linha.strip()
-                        
-                        if re.match(r'^\d{4,}\s*-\s*.+', linha_limpa):
-                            if codigo_produto and qtde_estoque is not None:
-                                if qtde_reservada is None:
-                                    qtde_reservada = 0
-                                
-                                match_codigo = re.match(r'^(\d+)\s*-\s*(.+)', codigo_produto)
-                                if match_codigo:
-                                    cod = match_codigo.group(1)
-                                    nome = match_codigo.group(2).strip()
-                                else:
-                                    cod = codigo_produto
-                                    nome = ""
-                                
-                                produto = {
-                                    'Código': cod,
-                                    'Nome do Produto': nome,
-                                    'Cor/Variação': descricao_cor if descricao_cor else "",
-                                    'Qtde em Estoque': qtde_estoque,
-                                    'Qtde Reservada': qtde_reservada,
-                                    'Qtde Disponível': qtde_estoque - qtde_reservada,
-                                    'Página': pagina_num
-                                }
-                                produtos.append(produto)
-                                
-                                if qtde_reservada > 0:
-                                    if pagina_num not in paginas_com_reserva:
-                                        paginas_com_reserva.append(pagina_num)
-                            
-                            codigo_produto = linha_limpa
-                            descricao_cor = None
-                            qtde_estoque = None
-                            qtde_reservada = None
-                        
-                        elif codigo_produto and re.match(r'^\d{3}\s*-\s*.+', linha_limpa):
+
+                        cabecalho = extrair_cabecalho_produto(linha_limpa)
+
+                        if cabecalho:
+                            flush_produto()
+                            cod_produto, nome_produto = cabecalho
+
+                        elif cod_produto and re.match(r'^\d{3}\s*-\s*.+', linha_limpa):
                             descricao_cor = linha_limpa
-                        
+
                         elif linha_limpa.startswith('Qtde em Estoque'):
                             partes = linha_limpa.split()
                             if len(partes) >= 4:
                                 try:
-                                    qtde_estoque = int(partes[-1])
+                                    qtde_estoque = float(partes[-1].replace(',', '.'))
                                 except:
                                     pass
-                        
+
+                        elif linha_limpa.startswith('Qtde Total em Estoque'):
+                            partes = linha_limpa.split()
+                            try:
+                                total_geral_estoque = float(partes[-1].replace(',', '.'))
+                            except:
+                                pass
+
+                        elif linha_limpa.startswith('Qtde Total Reservada'):
+                            partes = linha_limpa.split()
+                            try:
+                                total_geral_reservada = float(partes[-1].replace(',', '.'))
+                            except:
+                                pass
+
                         elif linha_limpa.startswith('Qtde Reservada'):
                             partes = linha_limpa.split()
                             if len(partes) >= 3:
                                 try:
-                                    qtde_reservada = int(partes[-1])
+                                    qtde_reservada = float(partes[-1].replace(',', '.'))
                                 except:
                                     qtde_reservada = 0
-                    
-                    if codigo_produto and qtde_estoque is not None:
-                        if qtde_reservada is None:
-                            qtde_reservada = 0
-                        
-                        match_codigo = re.match(r'^(\d+)\s*-\s*(.+)', codigo_produto)
-                        if match_codigo:
-                            cod = match_codigo.group(1)
-                            nome = match_codigo.group(2).strip()
-                        else:
-                            cod = codigo_produto
-                            nome = ""
-                        
-                        produto = {
-                            'Código': cod,
-                            'Nome do Produto': nome,
-                            'Cor/Variação': descricao_cor if descricao_cor else "",
-                            'Qtde em Estoque': qtde_estoque,
-                            'Qtde Reservada': qtde_reservada,
-                            'Qtde Disponível': qtde_estoque - qtde_reservada,
-                            'Página': pagina_num
-                        }
-                        produtos.append(produto)
-                        
-                        if qtde_reservada > 0:
-                            if pagina_num not in paginas_com_reserva:
-                                paginas_com_reserva.append(pagina_num)
-                        
-                        codigo_produto = None
-                        descricao_cor = None
-                        qtde_estoque = None
-                        qtde_reservada = None
-            
+
+            flush_produto()
+
             for pag in sorted(set(paginas_com_reserva)):
                 prods_pag = [p for p in produtos if p['Página'] == pag and p['Qtde Reservada'] > 0]
                 if prods_pag:
@@ -146,19 +151,20 @@ def extrair_produtos_inventario(caminho_pdf, arquivo_log):
         
         log.write(f"Total de unidades em estoque: {total_estoque}\n")
         log.write(f"Total de unidades reservadas: {total_reservado}\n")
+        if total_geral_estoque is not None:
+            log.write(f"Total geral em estoque (impresso no PDF): {total_geral_estoque}\n")
+        if total_geral_reservada is not None:
+            log.write(f"Total geral reservado (impresso no PDF): {total_geral_reservada}\n")
         log.write("="*80 + "\n")
-    
-    return produtos
 
-def salvar_resultados(produtos, arquivo_excel, arquivo_csv):
+    return produtos, total_geral_estoque, total_geral_reservada
+
+def salvar_resultados(produtos, arquivo_excel):
     df = pd.DataFrame(produtos)
-    
+
     df.to_excel(arquivo_excel, index=False)
     print(f"Dados salvos em Excel: {arquivo_excel}")
-    
-    df.to_csv(arquivo_csv, index=False, encoding='utf-8-sig')
-    print(f"Dados salvos em CSV: {arquivo_csv}")
-    
+
     return df
 
 def exibir_resumo(df):
@@ -198,27 +204,27 @@ if __name__ == "__main__":
     print("Iniciando extração de dados do PDF...")
     print(f"Arquivo: {caminho_pdf}\n")
     
-    produtos = extrair_produtos_inventario(caminho_pdf, arquivo_log)
-    
+    produtos, total_geral_estoque, total_geral_reservada = extrair_produtos_inventario(caminho_pdf, arquivo_log)
+
     if produtos:
         print(f"\nArquivo de log criado: {arquivo_log}")
-        
+
         df = salvar_resultados(
             produtos,
-            r"C:\Users\ricardo\Documents\Inventario\61_MENDES_inventario.xlsx",
-            r"C:\Users\ricardo\Documents\Inventario\61_MENDES_inventario.csv"
+            r"C:\Users\ricardo\Documents\Inventario\61_MENDES_inventario.xlsx"
         )
-        
+
         exibir_resumo(df)
-        
-        print(f"\n{'='*80}")
-        print("VERIFICAÇÃO:")
-        print(f"Total esperado em estoque (PDF): 90578")
-        print(f"Total calculado em estoque: {df['Qtde em Estoque'].sum()}")
-        print(f"Diferença: {df['Qtde em Estoque'].sum() - 90578}")
-        print(f"\nTotal esperado reservado (PDF): 42")
-        print(f"Total calculado reservado: {df['Qtde Reservada'].sum()}")
-        print(f"Diferença: {df['Qtde Reservada'].sum() - 42}")
-        print(f"{'='*80}")
+
+        if total_geral_estoque is not None and total_geral_reservada is not None:
+            print(f"\n{'='*80}")
+            print("VERIFICAÇÃO (comparado com o total impresso no PDF):")
+            print(f"Total esperado em estoque (PDF): {total_geral_estoque}")
+            print(f"Total calculado em estoque: {df['Qtde em Estoque'].sum()}")
+            print(f"Diferença: {df['Qtde em Estoque'].sum() - total_geral_estoque}")
+            print(f"\nTotal esperado reservado (PDF): {total_geral_reservada}")
+            print(f"Total calculado reservado: {df['Qtde Reservada'].sum()}")
+            print(f"Diferença: {df['Qtde Reservada'].sum() - total_geral_reservada}")
+            print(f"{'='*80}")
     else:
         print("Nenhum produto foi encontrado no PDF.")
